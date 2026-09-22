@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WeatherGPT Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Typing animation */
+        .typing-indicator span {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background-color: #64748b;
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 h-screen flex items-center justify-center p-4 font-sans text-slate-800">
+
+    <div class="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col h-[600px] max-h-full border border-slate-200">
+        
+        <!-- Header -->
+        <div class="bg-blue-600 text-white p-4 shadow-sm z-10 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="font-semibold text-lg leading-tight">WeatherGPT</h1>
+                    <p id="location-status" class="text-[10px] text-blue-200 opacity-80 flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" id="loc-dot"></span>
+                        Fetching location...
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat History -->
+        <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 flex flex-col relative">
+            <!-- Initial Bot Message -->
+            <div class="flex items-start gap-2 max-w-[85%] self-start">
+                <div class="w-8 h-8 rounded-full bg-blue-100 flex-shrink-0 flex items-center justify-center border border-blue-200 mt-1">
+                    <span class="text-blue-600 text-sm font-bold">W</span>
+                </div>
+                <div class="bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-sm px-4 py-2 shadow-sm text-sm">
+                    Hi! I'm WeatherGPT. Ask me about the weather or what you can do today! 
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Indicator (Hidden by default) -->
+        <div id="loading-indicator" class="hidden px-4 pb-2 bg-slate-50 flex items-center gap-2 self-start ml-10">
+            <div class="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex items-center h-[38px]">
+                <div class="typing-indicator flex">
+                    <span></span><span></span><span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="p-4 bg-white border-t border-slate-200">
+            <form id="chat-form" class="flex items-end gap-2 relative">
+                <div class="flex-1 bg-slate-100 rounded-2xl border border-slate-300 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all overflow-hidden">
+                    <textarea 
+                        id="user-input" 
+                        class="w-full bg-transparent border-none focus:ring-0 resize-none px-4 py-3 text-sm max-h-[120px] outline-none block" 
+                        rows="1"
+                        placeholder="Type your message..."
+                        required
+                    ></textarea>
+                </div>
+                <button 
+                    type="submit" 
+                    id="send-btn"
+                    class="bg-blue-600 hover:bg-blue-700 text-white rounded-full w-11 h-11 flex-shrink-0 flex items-center justify-center transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 ml-0.5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                    </svg>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const chatHistory = document.getElementById('chat-history');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const locationStatus = document.getElementById('location-status');
+        const locDot = document.getElementById('loc-dot');
+
+        // State for Geolocation
+        let userLat = null;
+        let userLng = null;
+
+        // Fetch Location on Load
+        function fetchUserLocation() {
+            console.log("In fetchUserLocation");
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        userLat = position.coords.latitude;
+                        userLng = position.coords.longitude;
+                        console.log(`Location secured -> Latitude: ${userLat}, Longitude: ${userLng}`);
+                        
+                        // Update UI to show location is ready
+                        locDot.classList.replace('bg-yellow-400', 'bg-green-400');
+                        locDot.classList.remove('animate-pulse');
+                        locationStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-green-400"></span> Location acquired`;
+                        
+                        setTimeout(() => { locationStatus.style.opacity = '0'; }, 3000); // Fade out after a bit
+                    },
+                    (error) => {
+                        console.error("Error getting location: ", error.message);
+                        locDot.classList.replace('bg-yellow-400', 'bg-red-400');
+                        locDot.classList.remove('animate-pulse');
+                        locationStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Location denied/unavailable`;
+                    },
+                    { timeout: 10000 } // Don't wait forever
+                );
+            } else {
+                console.error("Geolocation is not supported by this browser.");
+                locDot.classList.replace('bg-yellow-400', 'bg-red-400');
+                locationStatus.innerHTML = "Geolocation not supported";
+            }
+        }
+
+        // Trigger on load
+        window.onload = fetchUserLocation;
+
+        // Auto-resize textarea
+        userInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            let newHeight = Math.min(this.scrollHeight, 120);
+            this.style.height = newHeight + 'px';
+            this.style.overflowY = this.scrollHeight > 120 ? 'auto' : 'hidden';
+        });
+
+        // Handle Enter key
+        userInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (this.value.trim() !== '') {
+                    chatForm.dispatchEvent(new Event('submit'));
+                }
+            }
+        });
+
+        // UI Helpers
+        function scrollToBottom() {
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        function appendMessage(message, sender) {
+            const msgDiv = document.createElement('div');
+            const safeMessage = escapeHTML(message);
+            
+            if (sender === 'user') {
+                msgDiv.className = 'max-w-[85%] self-end flex items-end gap-2 flex-row-reverse';
+                msgDiv.innerHTML = `
+                    <div class="bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-2 shadow-sm text-sm whitespace-pre-wrap break-words">
+                        ${safeMessage}
+                    </div>
+                `;
+            } else {
+                msgDiv.className = 'flex items-start gap-2 max-w-[85%] self-start';
+                msgDiv.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-blue-100 flex-shrink-0 flex items-center justify-center border border-blue-200 mt-1">
+                        <span class="text-blue-600 text-sm font-bold">W</span>
+                    </div>
+                    <div class="bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-sm px-4 py-2 shadow-sm text-sm whitespace-pre-wrap break-words">
+                        ${safeMessage}
+                    </div>
+                `;
+            }
+            
+            chatHistory.appendChild(msgDiv);
+            chatHistory.appendChild(loadingIndicator); // Keep loading indicator at the bottom
+            scrollToBottom();
+        }
+
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g, 
+                tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+            );
+        }
+
+        // API Call
+        async function fetchAPIResponse(userText) {
+            const apiUrl = 'https://weathergpt-a801e269.fastapicloud.dev/chat';
+            
+            // Construct payload: Append location only if available
+            let payloadMessage = userText;
+            if (userLat !== null && userLng !== null) {
+                payloadMessage += `, i am in ${userLat},${userLng}`;
+            }
+
+            console.log("Sending payload to API:", payloadMessage);
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'accept': 'application/json'
+                    },
+                    body: JSON.stringify({ message: payloadMessage })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                // Handle different potential response formats gracefully
+                if (typeof data === 'string') return data;
+                if (data && typeof data === 'object') {
+                    return data.response || data.message || data.reply || data.text || data.answer || JSON.stringify(data);
+                }
+                return "Received an unexpected response format.";
+
+            } catch (error) {
+                console.error("API Error:", error);
+                return "⚠️ Sorry, I couldn't reach the server. Please check your connection.";
+            }
+        }
+
+        // Form Submit Handler
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const originalText = userInput.value.trim();
+            if (!originalText) return;
+
+            // 1. Display original message in UI (No coordinates shown to user)
+            appendMessage(originalText, 'user');
+            
+            // 2. Clear UI state
+            userInput.value = '';
+            userInput.style.height = 'auto';
+            userInput.disabled = true;
+            sendBtn.disabled = true;
+            
+            // 3. Show Loading
+            loadingIndicator.classList.remove('hidden');
+            scrollToBottom();
+
+            // 4. Call API (Coordinates are appended inside this function)
+            const botResponse = await fetchAPIResponse(originalText);
+
+            // 5. Hide Loading & Show Response
+            loadingIndicator.classList.add('hidden');
+            appendMessage(botResponse, 'bot');
+            
+            // 6. Restore Input
+            userInput.disabled = false;
+            sendBtn.disabled = false;
+            userInput.focus();
+        });
+    </script>
+</body>
+</html>

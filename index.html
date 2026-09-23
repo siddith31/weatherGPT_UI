@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WeatherGPT Chat</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         /* Custom scrollbar */
         ::-webkit-scrollbar { width: 6px; }
@@ -55,7 +57,6 @@
 
         <!-- Chat History -->
         <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 flex flex-col relative">
-            <!-- Initial Bot Message -->
             <div class="flex items-start gap-2 max-w-[85%] self-start">
                 <div class="w-8 h-8 rounded-full bg-blue-100 flex-shrink-0 flex items-center justify-center border border-blue-200 mt-1">
                     <span class="text-blue-600 text-sm font-bold">W</span>
@@ -66,7 +67,7 @@
             </div>
         </div>
 
-        <!-- Loading Indicator (Hidden by default) -->
+        <!-- Loading Indicator -->
         <div id="loading-indicator" class="hidden px-4 pb-2 bg-slate-50 flex items-center gap-2 self-start ml-10">
             <div class="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex items-center h-[38px]">
                 <div class="typing-indicator flex">
@@ -75,18 +76,44 @@
             </div>
         </div>
 
-        <!-- Input Area -->
-        <div class="p-4 bg-white border-t border-slate-200">
+        <!-- Input Area with Speech-to-Text -->
+        <div class="p-4 bg-white border-t border-slate-200 flex flex-col gap-2">
+            <!-- Language Selector -->
+            <div class="flex justify-between items-center px-1">
+                <span class="text-[10px] text-slate-400 font-medium uppercase tracking-wider" id="stt-status"></span>
+                <select id="stt-lang" class="text-xs bg-transparent text-slate-500 outline-none cursor-pointer hover:text-slate-700 transition-colors">
+                    <option value="en-US">English (US)</option>
+                    <option value="hi-IN">Hindi (हिन्दी)</option>
+                    <option value="ta-IN">Tamil (தமிழ்)</option>
+                    <option value="es-ES">Spanish (Espanõl)</option>
+                    <option value="fr-FR">French (Français)</option>
+                </select>
+            </div>
+            
             <form id="chat-form" class="flex items-end gap-2 relative">
-                <div class="flex-1 bg-slate-100 rounded-2xl border border-slate-300 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all overflow-hidden">
+                <div class="flex-1 bg-slate-100 rounded-2xl border border-slate-300 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all overflow-hidden flex">
                     <textarea 
                         id="user-input" 
                         class="w-full bg-transparent border-none focus:ring-0 resize-none px-4 py-3 text-sm max-h-[120px] outline-none block" 
                         rows="1"
-                        placeholder="Type your message..."
+                        placeholder="Type or speak your message..."
                         required
                     ></textarea>
                 </div>
+                
+                <!-- Mic / Waveform Button -->
+                <button 
+                    type="button" 
+                    id="mic-btn"
+                    class="bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-600 rounded-full w-11 h-11 flex-shrink-0 flex items-center justify-center transition-all shadow-sm focus:outline-none"
+                    title="Start/Stop Voice Input"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2v20M17 5v14M22 10v4M7 5v14M2 10v4"/>
+                    </svg>
+                </button>
+
+                <!-- Send Button -->
                 <button 
                     type="submit" 
                     id="send-btn"
@@ -110,62 +137,121 @@
         const locationStatus = document.getElementById('location-status');
         const locDot = document.getElementById('loc-dot');
 
+        // Speech-to-Text Elements
+        const micBtn = document.getElementById('mic-btn');
+        const langSelect = document.getElementById('stt-lang');
+        const sttStatus = document.getElementById('stt-status');
+
         // State for Geolocation
         let userLat = null;
         let userLng = null;
 
         // Fetch Location on Load
         function fetchUserLocation() {
-            console.log("In fetchUserLocation");
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
                         userLat = position.coords.latitude;
                         userLng = position.coords.longitude;
-                        console.log(`Location secured -> Latitude: ${userLat}, Longitude: ${userLng}`);
-                        
-                        // Update UI to show location is ready
                         locDot.classList.replace('bg-yellow-400', 'bg-green-400');
                         locDot.classList.remove('animate-pulse');
                         locationStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-green-400"></span> Location acquired`;
-                        
-                        setTimeout(() => { locationStatus.style.opacity = '0'; }, 3000); // Fade out after a bit
+                        setTimeout(() => { locationStatus.style.opacity = '0'; }, 3000);
                     },
                     (error) => {
-                        console.error("Error getting location: ", error.message);
                         locDot.classList.replace('bg-yellow-400', 'bg-red-400');
                         locDot.classList.remove('animate-pulse');
-                        locationStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Location denied/unavailable`;
+                        locationStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Location denied`;
                     },
-                    { timeout: 10000 } // Don't wait forever
+                    { timeout: 10000 }
                 );
             } else {
-                console.error("Geolocation is not supported by this browser.");
-                locDot.classList.replace('bg-yellow-400', 'bg-red-400');
                 locationStatus.innerHTML = "Geolocation not supported";
             }
         }
-
-        // Trigger on load
         window.onload = fetchUserLocation;
 
         // Auto-resize textarea
-        userInput.addEventListener('input', function() {
-            this.style.height = 'auto';
-            let newHeight = Math.min(this.scrollHeight, 120);
-            this.style.height = newHeight + 'px';
-            this.style.overflowY = this.scrollHeight > 120 ? 'auto' : 'hidden';
-        });
+        function autoResizeTextarea() {
+            userInput.style.height = 'auto';
+            let newHeight = Math.min(userInput.scrollHeight, 120);
+            userInput.style.height = newHeight + 'px';
+            userInput.style.overflowY = userInput.scrollHeight > 120 ? 'auto' : 'hidden';
+        }
+        userInput.addEventListener('input', autoResizeTextarea);
 
         // Handle Enter key
         userInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                if (this.value.trim() !== '') {
-                    chatForm.dispatchEvent(new Event('submit'));
-                }
+                if (this.value.trim() !== '') chatForm.dispatchEvent(new Event('submit'));
             }
         });
+
+        // Speech to Text Logic
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let isListening = false;
+        let originalText = "";
+
+        if (!SpeechRecognition) {
+            micBtn.style.display = 'none'; // Hide if browser unsupported
+        } else {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = 0; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript;
+                }
+                
+                // Append transcript to whatever was already typed in the box
+                userInput.value = (originalText ? originalText + " " : "") + transcript;
+                autoResizeTextarea();
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Speech recognition error:", event.error);
+                sttStatus.innerText = "Error: " + event.error;
+                stopListening();
+            };
+
+            function startListening() {
+                originalText = userInput.value.trim();
+                recognition.lang = langSelect.value;
+                recognition.start();
+                isListening = true;
+                
+                // Update UI to show active listening state
+                sttStatus.innerText = "Listening...";
+                sttStatus.classList.add('text-red-500', 'animate-pulse');
+                micBtn.classList.replace('bg-slate-100', 'bg-red-500');
+                micBtn.classList.replace('text-slate-600', 'text-white');
+                micBtn.classList.add('animate-pulse', 'border-red-600');
+            }
+
+            function stopListening() {
+                recognition.stop();
+                isListening = false;
+                
+                // Revert UI to normal state
+                sttStatus.innerText = "";
+                sttStatus.classList.remove('text-red-500', 'animate-pulse');
+                micBtn.classList.replace('bg-red-500', 'bg-slate-100');
+                micBtn.classList.replace('text-white', 'text-slate-600');
+                micBtn.classList.remove('animate-pulse', 'border-red-600');
+            }
+
+            micBtn.addEventListener('click', () => {
+                if (!isListening) {
+                    startListening();
+                } else {
+                    stopListening();
+                }
+            });
+        }
 
         // UI Helpers
         function scrollToBottom() {
@@ -174,9 +260,9 @@
 
         function appendMessage(message, sender) {
             const msgDiv = document.createElement('div');
-            const safeMessage = escapeHTML(message);
             
             if (sender === 'user') {
+                const safeMessage = escapeHTML(message);
                 msgDiv.className = 'max-w-[85%] self-end flex items-end gap-2 flex-row-reverse';
                 msgDiv.innerHTML = `
                     <div class="bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-2 shadow-sm text-sm whitespace-pre-wrap break-words">
@@ -184,19 +270,20 @@
                     </div>
                 `;
             } else {
+                const parsedMessage = marked.parse(message);
                 msgDiv.className = 'flex items-start gap-2 max-w-[85%] self-start';
                 msgDiv.innerHTML = `
                     <div class="w-8 h-8 rounded-full bg-blue-100 flex-shrink-0 flex items-center justify-center border border-blue-200 mt-1">
                         <span class="text-blue-600 text-sm font-bold">W</span>
                     </div>
-                    <div class="bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-sm px-4 py-2 shadow-sm text-sm whitespace-pre-wrap break-words">
-                        ${safeMessage}
+                    <div class="bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-sm px-4 py-2 shadow-sm text-sm break-words prose prose-sm prose-slate max-w-none">
+                        ${parsedMessage}
                     </div>
                 `;
             }
             
             chatHistory.appendChild(msgDiv);
-            chatHistory.appendChild(loadingIndicator); // Keep loading indicator at the bottom
+            chatHistory.appendChild(loadingIndicator);
             scrollToBottom();
         }
 
@@ -208,39 +295,25 @@
 
         // API Call
         async function fetchAPIResponse(userText) {
-            const apiUrl = 'https://weathergpt-a801e269.fastapicloud.dev/chat';
-            
-            // Construct payload: Append location only if available
+            const apiUrl = 'https://weather-gpt-lovat-gamma.vercel.app/chat';
             let payloadMessage = userText;
             if (userLat !== null && userLng !== null) {
                 payloadMessage += `, i am in ${userLat},${userLng}`;
             }
 
-            console.log("Sending payload to API:", payloadMessage);
-
             try {
                 const response = await fetch(apiUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'accept': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json', 'accept': 'application/json' },
                     body: JSON.stringify({ message: payloadMessage })
                 });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const data = await response.json();
-                
-                // Handle different potential response formats gracefully
                 if (typeof data === 'string') return data;
                 if (data && typeof data === 'object') {
                     return data.response || data.message || data.reply || data.text || data.answer || JSON.stringify(data);
                 }
                 return "Received an unexpected response format.";
-
             } catch (error) {
                 console.error("API Error:", error);
                 return "⚠️ Sorry, I couldn't reach the server. Please check your connection.";
@@ -251,32 +324,31 @@
         chatForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            // Stop listening if user submits while mic is still on
+            if (isListening) stopListening();
+            
             const originalText = userInput.value.trim();
             if (!originalText) return;
 
-            // 1. Display original message in UI (No coordinates shown to user)
             appendMessage(originalText, 'user');
             
-            // 2. Clear UI state
             userInput.value = '';
             userInput.style.height = 'auto';
             userInput.disabled = true;
             sendBtn.disabled = true;
+            if(SpeechRecognition) micBtn.disabled = true;
             
-            // 3. Show Loading
             loadingIndicator.classList.remove('hidden');
             scrollToBottom();
 
-            // 4. Call API (Coordinates are appended inside this function)
             const botResponse = await fetchAPIResponse(originalText);
 
-            // 5. Hide Loading & Show Response
             loadingIndicator.classList.add('hidden');
             appendMessage(botResponse, 'bot');
             
-            // 6. Restore Input
             userInput.disabled = false;
             sendBtn.disabled = false;
+            if(SpeechRecognition) micBtn.disabled = false;
             userInput.focus();
         });
     </script>
